@@ -1,0 +1,12 @@
+{
+  "name": "aws-3tier-container-deployment-app",
+  "version": "0.0.0",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "~4.17.1",
+    "pg": "5.2.1",
+    "uuid": "~3.3.3"
+  }
+}

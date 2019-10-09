@@ -1,0 +1,21 @@
+{
+  "Parameters" : {
+    "StackPrefix": "aws-ttcd",
+    "GithubRepoOwner": "rupertbg",
+    "GithubRepoName": "aws-3tier-container-deployment",
+    "GithubRepoBranch": "master",
+    "GithubTokenSecretName": "Github",
+    "GithubAccessTokenName": "PersonalAccessToken",
+    "PublicTLD": <your public route53 domain>,
+    "PublicTLDHostedZoneId": <your route53 hosted zone id>,
+    "SampleAppSubdomain": "app",
+    "AppContainerCount": "2",
+    "AppContainerPort": "8080",
+    "AppCPU": "256",
+    "AppMemoryMB": "512",
+    "AppLogRetention": "7",
+    "DBInstanceClass": "db.t3.medium",
+    "DBEngineVersion": "10.7",
+    "DBRetentionPeriod": "7"
+  }
+}

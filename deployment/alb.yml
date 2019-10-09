@@ -1,0 +1,159 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+
+  StackPrefix:
+    Type: String
+
+Resources:
+
+  Certificate:
+    Type: Custom::Certificate
+    Properties:
+      DomainName:
+        Fn::ImportValue:
+            !Sub ${StackPrefix}-dns-alb-name
+      ValidationMethod: DNS
+      ServiceToken: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:binxio-cfn-certificate-provider
+
+  CertificateDNSRecord:
+    Type: Custom::CertificateDNSRecord
+    Properties:
+      CertificateArn: !Ref Certificate
+      DomainName:
+        Fn::ImportValue:
+            !Sub ${StackPrefix}-dns-alb-name
+      ServiceToken: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:binxio-cfn-certificate-provider
+
+  IssuedCertificate:
+    Type: Custom::IssuedCertificate
+    Properties:
+      CertificateArn: !Ref Certificate
+      ServiceToken: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:binxio-cfn-certificate-provider
+
+  DomainValidationRecord:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneId:
+        Fn::ImportValue:
+            !Sub ${StackPrefix}-dns-publichzi
+      RecordSets:
+        - Name: !GetAtt CertificateDNSRecord.Name
+          Type: !GetAtt CertificateDNSRecord.Type
+          TTL: 60
+          Weight: 1
+          SetIdentifier: !Ref Certificate
+          ResourceRecords:
+            - !GetAtt CertificateDNSRecord.Value
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Ref AWS::StackName
+      GroupDescription: !Sub Security group for ${AWS::StackName} load balancer
+      VpcId:
+        Fn::ImportValue:
+          !Sub ${StackPrefix}-vpc
+
+  SecurityGroupHTTPSinbound:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref SecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: 0.0.0.0/0
+
+  LogsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+
+  LogsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DeletionPolicy: Retain
+    Properties:
+      Bucket: !Ref LogsBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Action: s3:PutObject
+            Principal:
+              AWS: 783225319266
+            Resource: !Sub arn:aws:s3:::${LogsBucket}/AWSLogs/${AWS::AccountId}/*
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${StackPrefix}-alb
+      Scheme: internet-facing
+      LoadBalancerAttributes:
+      - Key: idle_timeout.timeout_seconds
+        Value: 30
+      - Key: access_logs.s3.enabled
+        Value: true
+      - Key: access_logs.s3.bucket
+        Value: !Ref LogsBucket
+      SecurityGroups:
+        - !Ref SecurityGroup
+      Subnets:
+        - Fn::ImportValue:
+            !Sub ${StackPrefix}-vpc-public-a
+        - Fn::ImportValue:
+            !Sub ${StackPrefix}-vpc-public-b
+
+  WAFAssociation:
+    Type: AWS::WAFRegional::WebACLAssociation
+    Properties:
+      ResourceArn: !Ref LoadBalancer
+      WebACLId:
+        Fn::ImportValue:
+          !Sub ${StackPrefix}-waf-regional-acl
+
+  ALBDNSAlias:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId:
+        Fn::ImportValue:
+            !Sub ${StackPrefix}-dns-publichzi
+      Name:
+        Fn::ImportValue:
+          !Sub ${StackPrefix}-dns-alb-name
+      Type: A
+      AliasTarget:
+        HostedZoneId: !GetAtt LoadBalancer.CanonicalHostedZoneID
+        DNSName: !GetAtt LoadBalancer.DNSName
+
+  HTTPSListener:
+    DependsOn:
+      - LoadBalancer
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            ContentType: text/plain
+            MessageBody: 404 Not Found
+            StatusCode: 404
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref IssuedCertificate
+
+Outputs:
+  LoadBalancerDNSName:
+    Value: !GetAtt LoadBalancer.DNSName
+    Export:
+      Name: !Sub ${StackPrefix}-alb-dnsname
+  LoadBalancerHostedZoneId:
+    Value: !GetAtt LoadBalancer.CanonicalHostedZoneID
+    Export:
+      Name: !Sub ${StackPrefix}-alb-hostedzone
+  LoadBalancerSecurityGroup:
+    Value: !Ref SecurityGroup
+    Export:
+      Name: !Sub ${StackPrefix}-alb-sg
+  HTTPSListener:
+    Value: !Ref HTTPSListener
+    Export:
+      Name: !Sub ${StackPrefix}-alb-listener

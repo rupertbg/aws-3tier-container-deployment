@@ -1,5 +1,23 @@
 # Example: CI/CD 3-tier Web App on AWS
-This example repo deploys all the infrastructure required to host an auto-scalable, containerized Node JS application on AWS with Amazon Aurora running Postgres as the database.
+
+
+## Architecture
+
+The architecture follows a standard three-tier web app design made up of the following AWS components:
+  - [Amazon Cloudfront](https://aws.amazon.com/cloudfront/)
+  - [AWS WAF](https://aws.amazon.com/waf/)
+  - [Amazon Route 53](https://aws.amazon.com/route53/)
+  - [AWS Certificate Manager](https://aws.amazon.com/certificate-manager/)
+  - [Application Load Balancer](https://aws.amazon.com/elasticloadbalancing/)
+  - [Amazon VPC](https://aws.amazon.com/vpc/)
+  - [AWS Fargate](https://aws.amazon.com/fargate/)
+  - [AWS CodeBuild](https://aws.amazon.com/codebuild/)
+  - [AWS CodeDeploy](https://aws.amazon.com/codedeploy/)
+  - [AWS CodePipeline](https://aws.amazon.com/codepipeline/)
+  - [AWS Secrets Manager](https://aws.amazon.com/secrets-manager/)
+  - [Amazon Aurora - Postgres](https://aws.amazon.com/rds/aurora/)
+
+![Architecture Diagram](img/arch.png)
 
 ## Setup
 
@@ -11,20 +29,11 @@ The `pipeline.json` file is required and allows all configurable parameters to b
   1. A Public Hosted Zone Domain configured in Route 53. This is excluded so you can sort out your own Domain Registration, however there is an example to deploy a Public Hosted Zone in `deployment/prereq/domain.yml`. Relevant parameters:
       - **PublicTLD**: _The domain name_
       - **PublicTLDHostedZoneId**: _The Hosted Zone ID_
-  2. A Secrets Manager secret which stores a [Personal Access Token](https://help.github.com/en/articles/creating-a-personal-access-token-for-the-command-line) for Github. `deployment/prereq/secret.yml` is supplied to demonstrate how this secret is created. Note you would still need to generate and store the real Token from Github into the Secret that is created. Relevant parameters:
-      - **GithubTokenSecretName**: _The name of the Secret_
-      - **GithubAccessTokenName**: _The key in the JSON formatted secret that stores the token_
-
 
 ```json
 {
   "Parameters" : {
     "StackPrefix": "a-prefix-for-your-resource-names",
-    "GithubRepoOwner": "rupertbg",
-    "GithubRepoName": "aws-3tier-container-deployment",
-    "GithubRepoBranch": "master",
-    "GithubTokenSecretName": "the name of your secrets manager secret for Github OAuth",
-    "GithubAccessTokenName": "the name of the attribute in the secret that has the oauth token",
     "PublicTLD": "a.public.domain.example.com from Route 53",
     "PublicTLDHostedZoneId": "the Route 53hosted zone ID of that public domain name",
     "ALBSubdomain": "a random subdomain for the ALB e.g. 'alb-214dba6'",
@@ -40,7 +49,7 @@ The `pipeline.json` file is required and allows all configurable parameters to b
 }
 ```
 
-Additionally, any Cloudformation Action in the Pipeline could be extended to mark use of its own Template Configuration file.
+Additionally, any Cloudformation Action in the Pipeline could be extended to make use of its own Template Configuration file.
 
 ### Step 2: Cloudfront N. Virginia (us-east-1) requirement
 **If you plan on deploying the entire stack in us-east-1 you can skip this step**
@@ -53,9 +62,9 @@ Run the bucket deployment script first before continuing if you are using any re
 
 ```
 Usage: deploy-bucket.sh <StackPrefix> <AWSProfile>
-- StackPrefix: A prefix to use for namespacing resources
-- AWSProfile: Optional. The name of an AWS CLI profile to use
-```
+ - StackPrefix: A prefix to use for namespacing resources
+ - AWSProfile: Optional. The name of an AWS CLI profile to use
+ ```
 
 **Make sure the StackPrefix matches the StackPrefix in `pipeline.json` in Step 1**
 
@@ -63,19 +72,44 @@ Usage: deploy-bucket.sh <StackPrefix> <AWSProfile>
 Because Cloudformation [Template Configuration](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/continuous-delivery-codepipeline-cfn-artifacts.html#w2ab1c13c15c15) files are limited to use only via CodePipeline, the file created in Step 1 is only used for subsequent continuous deployment of the stack.
 
 To deploy the Pipeline the first time:
-  1. Jump into the [Cloudformation Console](https://console.aws.amazon.com/cloudformation/home).
-  2. Click **Create Stack**.
-  3. Upload the `deployment/prereq/pipeline.yml` template.
-  4. Complete the Parameters section using the values from Step 1.
-  5. Click through, adding any tags as desired and [acknowledging IAM resource creation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/using-iam-template.html#using-iam-capabilities).
-  6. The rest of the deployment is automated and will be visible in the [CodePipeline Console](https://console.aws.amazon.com/codesuite/codepipeline/pipelines).
+ 1. Jump into the [Cloudformation Console](https://console.aws.amazon.com/cloudformation/home).
+ 2. Click **Create Stack**.
+ 3. Upload the `deployment/pipeline.yml` template.
+ 4. Complete the Parameters section using the values from Step 1.
+ 5. Click through, adding any tags as desired and [acknowledging IAM resource creation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/using-iam-template.html#using-iam-capabilities).
+ 6. The rest of the deployment is automated and will be visible in the [CodePipeline Console](https://console.aws.amazon.com/codesuite/codepipeline/pipelines).
 
-## Sample App
-One the pipeline is finished and the application has been deployed to Fargate, there are two endpoints you can reach to test the app is working:
-  - `https://${SampleAppSubdomain}.${PublicTLD}/sample`: Returns a request ID and time to confirm connectivity with Postgres on RDS.
-  - `https://${SampleAppSubdomain}.${PublicTLD}/sample`: A simple healthcheck endpoint used by the ALB.
+## Continuous Integration
 
-## WAF Configuration
+CI is handled using CodeBuild and CodePipeline.
+  1. CodeBuild is webhooked from Github when a PR is submitted or edited.
+  2. This kicks off a process to build a new image. Unit tests could be easily added to this step as well, or you can handle those separately in Github Actions.
+  3. CodeBuild webhooks back to Github to inform the status of the build.
+
+![Architecture Diagram](img/ci.png)
+
+## Continuous Deployment
+
+CD is handled using CodeBuild, CodePipeline and CodeDeploy.
+  1. Github webhooks CodeBuild when a change is made in the `master` branch in either of the application folders.
+  2. CodeBuild then runs a build of the Docker image.
+  3. If successful, CodeBuild then pushes the image to ECR.
+  4. A CloudWatch Event is triggered from the new image arriving in ECR.
+  5. This CloudWatch Event triggers the CodePipeline designed for deployments.
+  6. CodePipeline triggers CodeBuild for building deployment dependencies, like the Task Definitions with new image versions.
+  7. CodePipeline calls CodeDeploy to deploy the ECS Tasks to Fargate in a Blue/Green deployment. Integration tests can be added at this step using AWS Lambda.
+  8. To allow for zero-downtime deployments, CodeDeploy runs the tasks in a test route for successful health-checks before cutting traffic over the new containers.
+
+![Architecture Diagram](img/deploy.png)
+
+## Security
+Security is applied in a defense-in-depth approach. Internet facing services are protected by AWS WAF, with protections in place to prevent well-known attacks, hotlinking, and accessing the Distribution or Load Balancer from their default AWS-given addresses.
+
+Within the architecture, IAM is applied in a best-practice approach, avoiding excessive wildcard policies wherever possible. Access to relevant AWS Resources e.g. Secrets Manager is contained to only the access required, by the Principals that require it.
+
+Network access is controlled to prevent unexpected exposure between applications and the database. The applications running in AWS Fargate and the database running in RDS are both deployed within a private subnet, without a NAT gateway. To access AWS APIs there are endpoints deployed for only the services that are required. The Load Balancers are deployed in a public subnet.
+
+### WAF Configuration
 AWS WAF is configured on Cloudfront as well as the Application Load Balancer. The rules are designed to accomplish the following:
   - ALB is not accessible without the PublicTLD in the Host header. This prevents:
       - Accessing Cloudfront with the default domain given by AWS.
@@ -88,20 +122,17 @@ AWS WAF is configured on Cloudfront as well as the Application Load Balancer. Th
       - Content being embedded without using HTTPS.
       - Content being hotlinked from sites other than the chosen domain.
 
-## Architecture
-![Architecture Diagram](img/arch.png)
+## Operations
 
-The architecture follows a standard three-tier web app design made up of the following AWS components:
-  - [Amazon Cloudfront](https://aws.amazon.com/cloudfront/)
-  - [AWS WAF](https://aws.amazon.com/waf/)
-  - [Amazon Route 53](https://aws.amazon.com/route53/)
-  - [AWS Certificate Manager](https://aws.amazon.com/certificate-manager/)
-  - [Application Load Balancer](https://aws.amazon.com/elasticloadbalancing/)
-  - [Amazon VPC](https://aws.amazon.com/vpc/)
-  - [AWS Fargate](https://aws.amazon.com/fargate/)
-  - [AWS Secrets Manager](https://aws.amazon.com/secrets-manager/)
-  - [Amazon Aurora - Postgres](https://aws.amazon.com/rds/aurora/)
+### Application Containers
+To manage the containers running for an application you can use the AWS CLI as follows:
 
-## Credits
-- Thanks to [binxio](https://github.com/binxio) for making [cfn-certificate-provider](https://github.com/binxio/cfn-certificate-provider)
-- Thanks to [Aidan](https://github.com/aidansteele) and [Alana](https://github.com/alanakirby) for being awesome
+#### Scaling:
+`aws --region <your-region> ecs --service <service-name> --desired-count <number>`
+
+You can use this command to completely stop a service by reducing the container count to 0.
+
+#### Deployments
+Although deployments are handled manually via the continuous delivery pipeline mentioned above, you can force a new deployment like so:
+
+`aws --region <your-region> ecs --service <service-name> --force-new-deployment`

@@ -1,12 +1,10 @@
 AWSTemplateFormatVersion: 2010-09-09
 
 Parameters:
-
   StackPrefix:
     Type: String
 
 Resources:
-
   VPC:
     Type: AWS::EC2::VPC
     Properties:
@@ -24,8 +22,8 @@ Resources:
       CidrBlock: 10.42.1.0/24
       AvailabilityZone: !Sub ${AWS::Region}a
       Tags:
-      - Key: Name
-        Value: !Sub ${StackPrefix}-public-a
+        - Key: Name
+          Value: !Sub ${StackPrefix}-public-a
 
   PublicSubnetB:
     Type: AWS::EC2::Subnet
@@ -34,8 +32,8 @@ Resources:
       CidrBlock: 10.42.2.0/24
       AvailabilityZone: !Sub ${AWS::Region}b
       Tags:
-      - Key: Name
-        Value: !Sub ${StackPrefix}-public-b
+        - Key: Name
+          Value: !Sub ${StackPrefix}-public-b
 
   PrivateSubnetA:
     Type: AWS::EC2::Subnet
@@ -44,8 +42,8 @@ Resources:
       CidrBlock: 10.42.3.0/24
       AvailabilityZone: !Sub ${AWS::Region}a
       Tags:
-      - Key: Name
-        Value: !Sub ${StackPrefix}-private-a
+        - Key: Name
+          Value: !Sub ${StackPrefix}-private-a
 
   PrivateSubnetB:
     Type: AWS::EC2::Subnet
@@ -54,8 +52,8 @@ Resources:
       CidrBlock: 10.42.4.0/24
       AvailabilityZone: !Sub ${AWS::Region}b
       Tags:
-      - Key: Name
-        Value: !Sub ${StackPrefix}-private-b
+        - Key: Name
+          Value: !Sub ${StackPrefix}-private-b
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
@@ -71,16 +69,16 @@ Resources:
     Properties:
       VpcId: !Ref VPC
       Tags:
-      - Key: Name
-        Value: !Sub ${StackPrefix}-public
+        - Key: Name
+          Value: !Sub ${StackPrefix}-public
 
   PrivateRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref VPC
       Tags:
-      - Key: Name
-        Value: !Sub ${StackPrefix}-private
+        - Key: Name
+          Value: !Sub ${StackPrefix}-private
 
   PublicRoute:
     Type: AWS::EC2::Route
@@ -130,7 +128,6 @@ Resources:
           ToPort: 443
           CidrIp: 10.42.4.0/24
 
-
   LogsEndpoint:
     Type: AWS::EC2::VPCEndpoint
     Properties:
@@ -143,7 +140,6 @@ Resources:
         - !Ref PrivateSubnetB
       VpcEndpointType: Interface
       VpcId: !Ref VPC
-
 
   MonitoringEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -200,6 +196,15 @@ Resources:
   S3Endpoint:
     Type: AWS::EC2::VPCEndpoint
     Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref EndpointSecurityGroup
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+      SubnetIds:
+        - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+      VpcEndpointType: Interface
+      VpcId: !Ref VPC
       PolicyDocument: !Sub |
         {
           "Statement": [
@@ -215,10 +220,6 @@ Resources:
             }
           ]
         }
-      RouteTableIds:
-        - !Ref PrivateRouteTable
-      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
-      VpcId: !Ref VPC
 
 Outputs:
   VPCId:

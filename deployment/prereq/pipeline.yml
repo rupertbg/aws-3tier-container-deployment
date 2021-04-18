@@ -1,7 +1,6 @@
 AWSTemplateFormatVersion: 2010-09-09
 
 Metadata:
-
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
@@ -14,14 +13,12 @@ Metadata:
           - GithubRepoOwner
           - GithubRepoName
           - GithubRepoBranch
-          - GithubTokenSecretName
-          - GithubAccessTokenName
+          - GithubCodeStarConnection
       - Label:
           default: Domain
         Parameters:
           - PublicTLD
           - PublicTLDHostedZoneId
-          - SampleAppSubdomain
       - Label:
           default: Application
         Parameters:
@@ -45,16 +42,12 @@ Metadata:
         default: "GithubRepoName: What's the name of the repo?"
       GithubRepoBranch:
         default: "GithubRepoBranch: Which branch would you like to use?"
-      GithubTokenSecretName:
-        default: "GithubTokenSecretName: What is the name of the secret in Secrets Manager for your Github credentials?"
-      GithubAccessTokenName:
-        default: "GithubAccessTokenName: What is the JSON key for the value of the Personal Access Token?"
+      GithubCodeStarConnection:
+        default: "GithubCodeStarConnection: What is the ARN of the CodeStar Connection to use for connection to GitHub?"
       PublicTLD:
         default: "PublicTLD: What is the domain you want to use e.g. subdomain.example.com?"
       PublicTLDHostedZoneId:
         default: "PublicTLDHostedZoneId: What is the Hosted Zone ID in Route 53 of that domain?"
-      SampleAppSubdomain:
-        default: "SampleAppSubdomain: What subdomain would you like on the applications public address?"
       AppContainerCount:
         default: "AppContainerCount: How many containers would you like to run? The max is 2000!"
       AppContainerPort:
@@ -73,7 +66,6 @@ Metadata:
         default: "DBRetentionPeriod: How many days would you like to keep the database snapshots for? The default is fine."
 
 Parameters:
-
   StackPrefix:
     Type: String
     Default: aws-ttcd
@@ -93,10 +85,7 @@ Parameters:
     Type: String
     Default: master
 
-  GithubTokenSecretName:
-    Type: String
-
-  GithubAccessTokenName:
+  GithubCodeStarConnection:
     Type: String
 
   PublicTLD:
@@ -104,12 +93,8 @@ Parameters:
     Description: Public Top level domain (TLD) in Route 53 to use for public DNS
 
   PublicTLDHostedZoneId:
-    Type: String
+    Type: AWS::Route53::HostedZone::Id
     Description: HostedZoneId of Public TLD
-
-  SampleAppSubdomain:
-    Type: String
-    Description: Subdomain for the sample application
 
   AppContainerCount:
     Type: Number
@@ -169,12 +154,12 @@ Parameters:
     Description: Days to keep snapshots
 
 Conditions:
-
-  notUSEast1:
-    !Not [!Equals [!Ref 'AWS::Region', us-east-1]]
+  notUSEast1: !Not
+    - !Equals
+      - !Ref AWS::Region
+      - us-east-1
 
 Resources:
-
   PipelineBucket:
     Type: AWS::S3::Bucket
     DependsOn: CloudformationRole
@@ -189,109 +174,43 @@ Resources:
       LifecyclePolicy:
         LifecyclePolicyText: |
           {
-            "rules": [{
-              "rulePriority": 1,
-              "description": "Keeplasttenimages",
-              "selection": {
-                "tagStatus": "tagged",
-                "tagPrefixList": ["20"],
-                "countType": "imageCountMoreThan",
-                "countNumber": 10
-              },
-              "action": {
-                "type": "expire"
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep 10",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": {
+                  "type": "expire"
+                }
               }
-            }]
+            ]
           }
-
-  AutoACMBuildProject:
-    Type: AWS::CodeBuild::Project
-    DependsOn: CloudformationRole
-    Properties:
-      Name: !Sub ${GithubRepoName}-auto-acm
-      Description: Deploys binxio/cfn-certificate-provider
-      ServiceRole: !GetAtt CloudformationRole.Arn
-      Artifacts:
-        Type: CODEPIPELINE
-      Environment:
-        Type: LINUX_CONTAINER
-        ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/standard:1.0
-      TimeoutInMinutes: 10
-      Source:
-        Type: CODEPIPELINE
-        BuildSpec:
-          !Sub |
-            version: 0.2
-            phases:
-              install:
-                commands:
-                  - wget https://raw.githubusercontent.com/binxio/cfn-certificate-provider/ba835ddf0525b77bb137a7d3fb2387ae848ac608/cloudformation/cfn-resource-provider.yaml;
-              post_build:
-                commands:
-                  - aws cloudformation --region ${AWS::Region} deploy --capabilities CAPABILITY_IAM --stack-name ${StackPrefix}-cfn-certificate-provider --template-file cfn-resource-provider.yaml --no-fail-on-empty-changeset;
-                  - |
-                    if [[ "${AWS::Region}" != "us-east-1" ]]; then
-                      aws cloudformation --region us-east-1 deploy --capabilities CAPABILITY_IAM --stack-name ${StackPrefix}-cfn-certificate-provider --template-file cfn-resource-provider.yaml --no-fail-on-empty-changeset;
-                    fi;
 
   AppBuildProject:
     Type: AWS::CodeBuild::Project
     DependsOn: CloudformationRole
     Properties:
-      Name: !Sub ${GithubRepoName}-sample-app
-      Description: Builds sample Node JS app
+      Name: !Sub ${GithubRepoName}-app-builder
+      Description: !Sub Builds the applications for ${GithubRepoName}
       ServiceRole: !GetAtt CodeBuildRole.Arn
       Artifacts:
         Type: CODEPIPELINE
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/standard:2.0
+        Image: aws/codebuild/standard:3.0
         PrivilegedMode: true
       TimeoutInMinutes: 10
       Source:
         Type: CODEPIPELINE
-        BuildSpec:
-          !Sub |
-            version: 0.2
-            artifacts:
-                files:
-                  - output.json
-                discard-paths: yes
-            phases:
-              install:
-                runtime-versions:
-                  nodejs: 10
-                  docker: 18
-              pre_build:
-                commands:
-                  - echo Logging in to Amazon ECR...
-                  - $(aws ecr get-login --no-include-email --region ${AWS::Region})
-              build:
-                commands:
-                  - IMAGE_TAG=`TZ=UTC date +%Y.%m.%d.%H%M`
-                  - IMAGE="${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${GithubRepoOwner}/${GithubRepoName}:$IMAGE_TAG"
-                  - echo Using image tag $IMAGE_TAG
-                  - echo Build started on `date`
-                  - echo Building the Docker image...
-                  - docker build -t $IMAGE .
-              post_build:
-                commands:
-                  - echo Build completed on `date`
-                  - echo Pushing the Docker image...
-                  - docker push $IMAGE
-                  - echo Writing image definitions file...
-                  - |
-                    cat > output.json << EOF
-                    {
-                      "Image": "$IMAGE"
-                    }
-                    EOF
+        BuildSpec: deployment/prereq/build-apps.sh
 
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
-    DependsOn: CloudformationRole
     Properties:
       Name: !Sub ${StackPrefix}-pipeline
       RoleArn: !GetAtt CodePipelineRole.Arn
@@ -314,15 +233,15 @@ Resources:
             - Name: Source
               ActionTypeId:
                 Category: Source
-                Owner: ThirdParty
-                Provider: GitHub
-                Version: 1
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: "1"
               RunOrder: 1
               Configuration:
-                Branch: !Ref GithubRepoBranch
-                OAuthToken: !Sub '{{resolve:secretsmanager:${GithubTokenSecretName}:SecretString:${GithubAccessTokenName}}}'
-                Owner: !Ref GithubRepoOwner
-                Repo: !Ref GithubRepoName
+                ConnectionArn: !Ref GithubCodeStarConnection
+                FullRepositoryId: !Sub ${GithubRepoOwner}/${GithubRepoName}
+                BranchName: !Ref GithubRepoBranch
+                DetectChanges: true
               OutputArtifacts:
                 - Name: source
 
@@ -332,7 +251,7 @@ Resources:
               ActionTypeId:
                 Category: Deploy
                 Owner: AWS
-                Version: 1
+                Version: "1"
                 Provider: CloudFormation
               InputArtifacts:
                 - Name: source
@@ -340,32 +259,20 @@ Resources:
                 ActionMode: REPLACE_ON_FAILURE
                 StackName: !Ref AWS::StackName
                 RoleArn: !GetAtt CloudformationRole.Arn
-                TemplateConfiguration: !Sub source::deployment/config/pipeline.json
+                TemplateConfiguration: source::deployment/config/pipeline.json
                 TemplatePath: source::deployment/prereq/pipeline.yml
                 Capabilities: CAPABILITY_NAMED_IAM,CAPABILITY_AUTO_EXPAND
                 ParameterOverrides: !Sub '{ "StackPrefix": "${StackPrefix}" }'
               RunOrder: 1
-            - Name: AutoACM
-              ActionTypeId:
-                Category: Build
-                Owner: AWS
-                Version: 1
-                Provider: CodeBuild
-              InputArtifacts:
-                - Name: source
-              Configuration:
-                ProjectName: !Ref AutoACMBuildProject
-              RunOrder: 2
 
         - Name: Infra
           Actions:
-
             - Name: VPC
               ActionTypeId:
                 Category: Deploy
                 Owner: AWS
                 Provider: CloudFormation
-                Version: 1
+                Version: "1"
               RunOrder: 1
               Configuration:
                 ActionMode: REPLACE_ON_FAILURE
@@ -383,7 +290,7 @@ Resources:
                 Category: Deploy
                 Owner: AWS
                 Provider: CloudFormation
-                Version: 1
+                Version: "1"
               RunOrder: 1
               Configuration:
                 ActionMode: REPLACE_ON_FAILURE
@@ -394,7 +301,7 @@ Resources:
                 ParameterOverrides: !Sub |
                   {
                     "StackPrefix": "${StackPrefix}",
-                    "AppDomain": "${SampleAppSubdomain}.${PublicTLD}"
+                    "AppDomain": "${PublicTLD}"
                   }
               InputArtifacts:
                 - Name: source
@@ -404,7 +311,7 @@ Resources:
                 Category: Deploy
                 Owner: AWS
                 Provider: CloudFormation
-                Version: 1
+                Version: "1"
               RunOrder: 1
               Configuration:
                 ActionMode: REPLACE_ON_FAILURE
@@ -425,7 +332,7 @@ Resources:
                 Category: Deploy
                 Owner: AWS
                 Provider: CloudFormation
-                Version: 1
+                Version: "1"
               RunOrder: 2
               Configuration:
                 ActionMode: REPLACE_ON_FAILURE
@@ -439,7 +346,6 @@ Resources:
                     "PublicTLD": "${PublicTLD}",
                     "PublicTLDHostedZoneId": "${PublicTLDHostedZoneId}",
                     "ALBSubdomain": "${StackPrefix}-${AWS::Region}-alb",
-                    "SampleAppSubdomain": "${SampleAppSubdomain}",
                     "PrivateTLD": "${StackPrefix}-private"
                   }
               InputArtifacts:
@@ -450,7 +356,7 @@ Resources:
                 Category: Deploy
                 Owner: AWS
                 Provider: CloudFormation
-                Version: 1
+                Version: "1"
               RunOrder: 3
               Configuration:
                 ActionMode: REPLACE_ON_FAILURE
@@ -468,7 +374,7 @@ Resources:
                 Category: Deploy
                 Owner: AWS
                 Provider: CloudFormation
-                Version: 1
+                Version: "1"
               RunOrder: 3
               Configuration:
                 ActionMode: REPLACE_ON_FAILURE
@@ -480,7 +386,7 @@ Resources:
                   {
                     "StackPrefix": "${StackPrefix}",
                     "ALBDomain": "${StackPrefix}-${AWS::Region}-alb.${PublicTLD}",
-                    "AppDomain": "${SampleAppSubdomain}.${PublicTLD}",
+                    "AppDomain": "${PublicTLD}",
                     "PublicTLDHostedZoneId": "${PublicTLDHostedZoneId}"
                   }
               InputArtifacts:
@@ -491,7 +397,7 @@ Resources:
                 Category: Deploy
                 Owner: AWS
                 Provider: CloudFormation
-                Version: 1
+                Version: "1"
               RunOrder: 4
               Configuration:
                 ActionMode: REPLACE_ON_FAILURE
@@ -508,7 +414,7 @@ Resources:
                 Category: Deploy
                 Owner: AWS
                 Provider: CloudFormation
-                Version: 1
+                Version: "1"
               RunOrder: 5
               Configuration:
                 ActionMode: REPLACE_ON_FAILURE
@@ -533,7 +439,7 @@ Resources:
                 Category: Build
                 Owner: AWS
                 Provider: CodeBuild
-                Version: 1
+                Version: "1"
               RunOrder: 1
               Configuration:
                 ProjectName: !Ref AppBuildProject
@@ -549,7 +455,7 @@ Resources:
                 Category: Deploy
                 Owner: AWS
                 Provider: CloudFormation
-                Version: 1
+                Version: "1"
               RunOrder: 1
               InputArtifacts:
                 - Name: source
@@ -583,18 +489,17 @@ Resources:
     Properties:
       AssumeRolePolicyDocument:
         Statement:
-        - Effect: Allow
-          Principal:
-            Service: codepipeline.amazonaws.com
-          Action:
-            - sts:AssumeRole
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
       Policies:
         - PolicyName: !Sub ${AWS::StackName}-codepipeline
           PolicyDocument:
             Statement:
               - Action:
                   - iam:PassRole
-                Resource: '*'
+                Resource: "*"
                 Effect: Allow
                 Condition:
                   StringEqualsIfExists:
@@ -612,16 +517,16 @@ Resources:
                   - rds:*
                   - sqs:*
                   - ecs:*
-                Resource: '*'
+                Resource: "*"
                 Effect: Allow
               - Action:
                   - codebuild:BatchGetBuilds
                   - codebuild:StartBuild
-                Resource: '*'
+                Resource: "*"
                 Effect: Allow
               - Action:
                   - ecr:DescribeImages
-                Resource: '*'
+                Resource: "*"
                 Effect: Allow
               - Action:
                   - s3:*
@@ -635,20 +540,19 @@ Resources:
     Properties:
       AssumeRolePolicyDocument:
         Statement:
-        - Effect: Allow
-          Principal:
-            Service:
-              - cloudformation.amazonaws.com
-              - codebuild.amazonaws.com
-          Action:
-            - sts:AssumeRole
+          - Effect: Allow
+            Principal:
+              Service:
+                - cloudformation.amazonaws.com
+                - codebuild.amazonaws.com
+            Action: sts:AssumeRole
       Policies:
         - PolicyName: !Sub ${AWS::StackName}-cloudformation
           PolicyDocument:
             Statement:
               - Action:
                   - iam:PassRole
-                Resource: '*'
+                Resource: "*"
                 Effect: Allow
                 Condition:
                   StringEqualsIfExists:
@@ -666,7 +570,7 @@ Resources:
                   - kms:UpdateAlias
                   - kms:UpdateKeyDescription
                   - kms:*KeyRotation
-                Resource: '*'
+                Resource: "*"
                 Effect: Allow
               - Action:
                   - ec2:*
@@ -690,7 +594,7 @@ Resources:
                   - kms:*
                   - codebuild:*
                   - codepipeline:*
-                Resource: '*'
+                Resource: "*"
                 Effect: Allow
               - Action: iam:*
                 Resource:
@@ -701,23 +605,18 @@ Resources:
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/aws-service-role/rds.amazonaws.com/AWSServiceRoleForRDS
                 Effect: Allow
               - Effect: Allow
-                Action: secretsmanager:GetSecretValue
-                Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${GithubTokenSecretName}-??????
-              - Effect: Allow
                 Action: secretsmanager:*
                 Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${StackPrefix}*
 
   CodeBuildRole:
-    DependsOn: CloudformationRole
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
         Statement:
-        - Effect: Allow
-          Principal:
-            Service: codebuild.amazonaws.com
-          Action:
-            - sts:AssumeRole
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
       Policies:
         - PolicyName: !Sub ${AWS::StackName}-codebuild
           PolicyDocument:
@@ -727,7 +626,7 @@ Resources:
                   - logs:CreateLogGroup
                   - logs:CreateLogStream
                   - logs:PutLogEvents
-                Resource: '*'
+                Resource: "*"
               - Effect: Allow
                 Action: iam:AssumeRole
                 Resource: !GetAtt CloudformationRole.Arn
@@ -746,4 +645,4 @@ Resources:
                   - ecr:InitiateLayerUpload
                   - ecr:PutImage
                   - ecr:UploadLayerPart
-                Resource: '*'
+                Resource: "*"

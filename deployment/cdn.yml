@@ -17,43 +17,19 @@ Parameters:
 Resources:
 
   Certificate:
-    Type: Custom::Certificate
+    Type: AWS::CertificateManager::Certificate
     Properties:
       DomainName: !Ref AppDomain
       ValidationMethod: DNS
-      ServiceToken: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:binxio-cfn-certificate-provider
-
-  CertificateDNSRecord:
-    Type: Custom::CertificateDNSRecord
-    Properties:
-      CertificateArn: !Ref Certificate
-      DomainName: !Ref AppDomain
-      ServiceToken: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:binxio-cfn-certificate-provider
-
-  IssuedCertificate:
-    Type: Custom::IssuedCertificate
-    Properties:
-      CertificateArn: !Ref Certificate
-      ServiceToken: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:binxio-cfn-certificate-provider
-
-  DomainValidationRecord:
-    Type: AWS::Route53::RecordSetGroup
-    Properties:
-      HostedZoneId: !Ref PublicTLDHostedZoneId
-      RecordSets:
-        - Name: !GetAtt CertificateDNSRecord.Name
-          Type: !GetAtt CertificateDNSRecord.Type
-          TTL: 60
-          Weight: 1
-          SetIdentifier: !Ref Certificate
-          ResourceRecords:
-            - !GetAtt CertificateDNSRecord.Value
+      DomainValidationOptions: 
+        - HostedZoneId: !Ref PublicTLDHostedZoneId
+          DomainName: !Ref AppDomain
 
   CloudfrontDistro:
     Type: AWS::CloudFront::Distribution
     Properties:
       DistributionConfig:
-        Comment: !Sub Cloudfront Distribution pointing to ALB of ${StackPrefix}
+        Comment: !Sub CDN for ${StackPrefix}
         WebACLId:
           Fn::ImportValue:
             !Sub ${StackPrefix}-waf-acl
@@ -90,7 +66,7 @@ Resources:
             Locations:
               - KP
         ViewerCertificate:
-          AcmCertificateArn: !Ref IssuedCertificate
+          AcmCertificateArn: !Ref Certificate
           SslSupportMethod: sni-only
 
   AppDNSAlias:

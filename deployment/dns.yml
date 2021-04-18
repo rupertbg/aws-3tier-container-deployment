@@ -14,9 +14,6 @@ Parameters:
   ALBSubdomain:
     Type: String
 
-  SampleAppSubdomain:
-    Type: String
-
   PrivateTLD:
     Type: String
 
@@ -49,10 +46,6 @@ Outputs:
     Value: !Ref PrivateHostedZone
     Export:
       Name: !Sub ${StackPrefix}-dns-privatehzi
-  AppPublicDNS:
-    Value: !Sub ${SampleAppSubdomain}.${PublicTLD}
-    Export:
-      Name: !Sub ${StackPrefix}-dns-app-name
   ALBDomain:
     Value: !Sub ${ALBSubdomain}.${PublicTLD}
     Export:

@@ -31,7 +31,7 @@ Parameters:
 
 Resources:
 
-  SampleAppTarget:
+  ExampleAppTarget:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
       VpcId:
@@ -51,8 +51,7 @@ Resources:
         - Key: deregistration_delay.timeout_seconds
           Value: '30'
 
-  SampleAppListenerRule:
-    DependsOn: SampleAppTarget
+  ExampleAppListenerRule:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
     Properties:
         ListenerArn:
@@ -65,7 +64,7 @@ Resources:
               - Fn::ImportValue:
                   !Sub ${StackPrefix}-dns-alb-name
         Actions:
-          - TargetGroupArn: !Ref SampleAppTarget
+          - TargetGroupArn: !Ref ExampleAppTarget
             Type: forward
 
   TaskExecRole:
@@ -99,7 +98,7 @@ Resources:
   CloudWatchLogsGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub /${StackPrefix}/sampleapp
+      LogGroupName: !Sub /${StackPrefix}/ExampleApp
       RetentionInDays: !Ref LogRetention
 
   TaskDefinition:
@@ -113,7 +112,7 @@ Resources:
         - FARGATE
       ExecutionRoleArn: !GetAtt TaskExecRole.Arn
       ContainerDefinitions:
-        - Name: !Sub ${StackPrefix}-sampleapp
+        - Name: !Sub ${StackPrefix}-ExampleApp
           Cpu: !Ref CPUUnits
           LogConfiguration:
             LogDriver: awslogs
@@ -166,6 +165,6 @@ Resources:
                 !Sub ${StackPrefix}-vpc-private-b
       TaskDefinition: !Ref TaskDefinition
       LoadBalancers:
-        - ContainerName: !Sub ${StackPrefix}-sampleapp
+        - ContainerName: !Sub ${StackPrefix}-ExampleApp
           ContainerPort: !Ref Port
-          TargetGroupArn: !Ref SampleAppTarget
+          TargetGroupArn: !Ref ExampleAppTarget

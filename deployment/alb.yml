@@ -8,43 +8,19 @@ Parameters:
 Resources:
 
   Certificate:
-    Type: Custom::Certificate
+    Type: AWS::CertificateManager::Certificate
     Properties:
       DomainName:
         Fn::ImportValue:
-            !Sub ${StackPrefix}-dns-alb-name
+          !Sub ${StackPrefix}-dns-alb-name
       ValidationMethod: DNS
-      ServiceToken: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:binxio-cfn-certificate-provider
-
-  CertificateDNSRecord:
-    Type: Custom::CertificateDNSRecord
-    Properties:
-      CertificateArn: !Ref Certificate
-      DomainName:
-        Fn::ImportValue:
-            !Sub ${StackPrefix}-dns-alb-name
-      ServiceToken: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:binxio-cfn-certificate-provider
-
-  IssuedCertificate:
-    Type: Custom::IssuedCertificate
-    Properties:
-      CertificateArn: !Ref Certificate
-      ServiceToken: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:binxio-cfn-certificate-provider
-
-  DomainValidationRecord:
-    Type: AWS::Route53::RecordSetGroup
-    Properties:
-      HostedZoneId:
-        Fn::ImportValue:
-            !Sub ${StackPrefix}-dns-publichzi
-      RecordSets:
-        - Name: !GetAtt CertificateDNSRecord.Name
-          Type: !GetAtt CertificateDNSRecord.Type
-          TTL: 60
-          Weight: 1
-          SetIdentifier: !Ref Certificate
-          ResourceRecords:
-            - !GetAtt CertificateDNSRecord.Value
+      DomainValidationOptions: 
+        - HostedZoneId:
+            Fn::ImportValue:
+              !Sub ${StackPrefix}-dns-publichzi
+          DomainName:
+            Fn::ImportValue:
+              !Sub ${StackPrefix}-dns-alb-name
 
   SecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -67,10 +43,12 @@ Resources:
   LogsBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
 
   LogsBucketPolicy:
     Type: AWS::S3::BucketPolicy
     DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       Bucket: !Ref LogsBucket
       PolicyDocument:
@@ -87,12 +65,18 @@ Resources:
       Name: !Sub ${StackPrefix}-alb
       Scheme: internet-facing
       LoadBalancerAttributes:
-      - Key: idle_timeout.timeout_seconds
-        Value: 30
-      - Key: access_logs.s3.enabled
-        Value: true
-      - Key: access_logs.s3.bucket
-        Value: !Ref LogsBucket
+        - Key: idle_timeout.timeout_seconds
+          Value: '30'
+        - Key: access_logs.s3.enabled
+          Value: 'true'
+        - Key: routing.http.drop_invalid_header_fields.enabled
+          Value: 'true'
+        - Key: routing.http2.enabled
+          Value: 'true'
+        - Key: routing.http.desync_mitigation_mode
+          Value: strictest
+        - Key: access_logs.s3.bucket
+          Value: !Ref LogsBucket
       SecurityGroups:
         - !Ref SecurityGroup
       Subnets:
@@ -102,10 +86,10 @@ Resources:
             !Sub ${StackPrefix}-vpc-public-b
 
   WAFAssociation:
-    Type: AWS::WAFRegional::WebACLAssociation
+    Type: AWS::WAFv2::WebACLAssociation
     Properties:
       ResourceArn: !Ref LoadBalancer
-      WebACLId:
+      WebACLArn:
         Fn::ImportValue:
           !Sub ${StackPrefix}-waf-regional-acl
 
@@ -124,8 +108,6 @@ Resources:
         DNSName: !GetAtt LoadBalancer.DNSName
 
   HTTPSListener:
-    DependsOn:
-      - LoadBalancer
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
       DefaultActions:
@@ -133,12 +115,12 @@ Resources:
           FixedResponseConfig:
             ContentType: text/plain
             MessageBody: 404 Not Found
-            StatusCode: 404
+            StatusCode: '404'
       LoadBalancerArn: !Ref LoadBalancer
       Port: 443
       Protocol: HTTPS
       Certificates:
-        - CertificateArn: !Ref IssuedCertificate
+        - CertificateArn: !Ref Certificate
 
 Outputs:
   LoadBalancerDNSName:

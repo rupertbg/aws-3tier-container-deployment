@@ -5,195 +5,96 @@ Parameters:
   StackPrefix:
     Type: String
 
-  AppDomain:
-    Type: String
+  RateLimit:
+    Type: Number
+    Default: 1000
 
 Resources:
 
-  LimitRequestSize:
-    Type: AWS::WAF::SizeConstraintSet
-    Properties:
-      Name: !Sub ${StackPrefix}LimitRequestSize
-      SizeConstraints:
-        - ComparisonOperator: GT
-          FieldToMatch:
-            Type: BODY
-          Size: 512
-          TextTransformation: NONE
-        - ComparisonOperator: GT
-          FieldToMatch:
-            Type: QUERY_STRING
-          Size: 16
-          TextTransformation: NONE
-
-  DetectSQLi:
-    Type: AWS::WAF::SqlInjectionMatchSet
-    Properties:
-      Name: !Sub ${StackPrefix}DetectSQLi
-      SqlInjectionMatchTuples:
-        - FieldToMatch:
-            Type: URI
-          TextTransformation: NONE
-        - FieldToMatch:
-            Type: QUERY_STRING
-          TextTransformation: NONE
-        - FieldToMatch:
-            Type: URI
-          TextTransformation: URL_DECODE
-        - FieldToMatch:
-            Type: QUERY_STRING
-          TextTransformation: URL_DECODE
-        - FieldToMatch:
-            Type: URI
-          TextTransformation: COMPRESS_WHITE_SPACE
-        - FieldToMatch:
-            Type: QUERY_STRING
-          TextTransformation: COMPRESS_WHITE_SPACE
-        - FieldToMatch:
-            Type: URI
-          TextTransformation: CMD_LINE
-        - FieldToMatch:
-            Type: QUERY_STRING
-          TextTransformation: CMD_LINE
-
-  DetectXSS:
-    Type: AWS::WAF::XssMatchSet
-    Properties:
-      Name: !Sub ${StackPrefix}DetectXSS
-      XssMatchTuples:
-        - FieldToMatch:
-            Type: URI
-          TextTransformation: NONE
-        - FieldToMatch:
-            Type: QUERY_STRING
-          TextTransformation: NONE
-        - FieldToMatch:
-            Type: URI
-          TextTransformation: HTML_ENTITY_DECODE
-        - FieldToMatch:
-            Type: QUERY_STRING
-          TextTransformation: HTML_ENTITY_DECODE
-        - FieldToMatch:
-            Type: URI
-          TextTransformation: URL_DECODE
-        - FieldToMatch:
-            Type: QUERY_STRING
-          TextTransformation: URL_DECODE
-
-  RefererMatch:
-    Type: AWS::WAF::ByteMatchSet
-    Properties:
-      Name: !Sub ${StackPrefix}RefererHeader
-      ByteMatchTuples:
-        - FieldToMatch:
-            Type: HEADER
-            Data: Referer
-          TargetString: !Sub https://${AppDomain}/
-          TextTransformation: LOWERCASE
-          PositionalConstraint: STARTS_WITH
-
-  HostMatch:
-    Type: AWS::WAF::ByteMatchSet
-    Properties:
-      Name: !Sub ${StackPrefix}HostHeader
-      ByteMatchTuples:
-        - FieldToMatch:
-            Type: HEADER
-            Data: Host
-          TargetString: !Ref AppDomain
-          TextTransformation: LOWERCASE
-          PositionalConstraint: EXACTLY
-
-  RefererExistsMatch:
-    Type: AWS::WAF::SizeConstraintSet
-    Properties:
-      Name: !Sub ${StackPrefix}RefererExists
-      SizeConstraints:
-        - ComparisonOperator: GE
-          FieldToMatch:
-            Type: HEADER
-            Data: Referer
-          Size: 1
-          TextTransformation: NONE
-
-  SecurityRule:
-    Type: AWS::WAF::Rule
-    Properties:
-      Name: !Sub ${StackPrefix}SecurityRule
-      MetricName: SecurityRule
-      Predicates:
-        - DataId: !Ref LimitRequestSize
-          Negated: false
-          Type: SizeConstraint
-        - DataId: !Ref DetectSQLi
-          Negated: false
-          Type: SqlInjectionMatch
-        - DataId: !Ref DetectXSS
-          Negated: false
-          Type: XssMatch
-
-  ValidRefererRule:
-    Type: AWS::WAF::Rule
-    Properties:
-      Name: !Sub ${StackPrefix}RefererRule
-      MetricName: RefererRule
-      Predicates:
-        - DataId: !Ref RefererMatch
-          Negated: false
-          Type: ByteMatch
-
-  InvalidHostRule:
-    Type: AWS::WAF::Rule
-    Properties:
-      Name: !Sub ${StackPrefix}InvalidHostRule
-      MetricName: InvalidHostRule
-      Predicates:
-        - DataId: !Ref HostMatch
-          Negated: true
-          Type: ByteMatch
-
-  EmptyRefererRule:
-    Type: AWS::WAF::Rule
-    Properties:
-      Name: !Sub ${StackPrefix}EmptyRefererRule
-      MetricName: EmptyRefererRule
-      Predicates:
-        - DataId: !Ref RefererExistsMatch
-          Negated: true
-          Type: SizeConstraint
-
-  # RateLimiterRule:
-  #   Type: AWS::WAF::RateBasedRule
-  #   Properties:
-  #     Name: RateLimiterRule
-  #     MetricName: RateLimiterRule
-  #     RateKey: IP
-  #     RateLimit: 2000
-
   WAFACL:
-    Type: AWS::WAF::WebACL
+    Type: AWS::WAFv2::WebACL
     Properties:
-      Name: !Sub ${StackPrefix} ACL
+      Name: APILoadBalancer
+      Scope: REGIONAL
       DefaultAction:
-        Type: BLOCK
-      MetricName: !Sub ${StackPrefix}ACL
+        Allow: {}
       Rules:
-        - Action:
-            Type: BLOCK
+        - Name: RateLimit
+          Priority: 0
+          Statement:
+            RateBasedStatement:
+              Limit: !Ref RateLimit
+              AggregateKeyType: IP
+          Action:
+            Block: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: RateLimit
+        - Name: AWSManagedRulesAmazonIpReputationList
           Priority: 1
-          RuleId: !Ref InvalidHostRule
-        - Action:
-            Type: BLOCK
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesAmazonIpReputationList
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedRulesAmazonIpReputationList
+        - Name: AWSManagedRulesCommonRuleSet
           Priority: 2
-          RuleId: !Ref SecurityRule
-        - Action:
-            Type: ALLOW
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWS-AWSManagedRulesCommonRuleSet
+        - Name: AWSManagedRulesKnownBadInputsRuleSet
           Priority: 3
-          RuleId: !Ref ValidRefererRule
-        - Action:
-            Type: ALLOW
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesKnownBadInputsRuleSet
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWS-AWSManagedRulesKnownBadInputsRuleSet
+        - Name: AWSManagedRulesLinuxRuleSet
           Priority: 4
-          RuleId: !Ref EmptyRefererRule
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesLinuxRuleSet
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWS-AWSManagedRulesLinuxRuleSet
+        - Name: AWSManagedRulesUnixRuleSet
+          Priority: 5
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesUnixRuleSet
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWS-AWSManagedRulesUnixRuleSet
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: WAFAPILoadBalancer
 
 Outputs:
   WAFACL:

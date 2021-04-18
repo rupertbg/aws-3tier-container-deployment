@@ -1,5 +1,5 @@
-# Example: CI/CD 3-tier Web App on AWS
-
+# Example: AWS Cloudformation-based 3-Tier Web App on ECS Fargate
+This is an example of a 3-Tier Web App architecture running on Amazon Web Services ECS Fargate written in Cloudformation and using CodePipeline and CodeBuild as deployment tools. The design includes examples of how to use CDN, WAF, Application Load Balancing, Private Networking, Secrets Management, Databases and deployment tools on AWS.
 
 ## Architecture
 
